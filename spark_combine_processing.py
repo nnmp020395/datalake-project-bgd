@@ -9,7 +9,7 @@ import os
 
 import datetime as dt
 current_date = dt.datetime.now()
-# current_date = current_date - dt.timedelta(days=1)
+# current_date = current_date - dt.timedelta(days=4)
 
 # Récupérer les informations de connexion à S3 de la connexion Airflow
 conn = BaseHook.get_connection("aws_default")
@@ -87,7 +87,11 @@ def combine_datasets(parquetfile, csvfile, parquet_column, csv_column):
     """Effectue une jointure entre les données Parquet et GPS"""
     df_parquet = ps.read_parquet(parquetfile)
     df_csv = ps.read_csv(csvfile)
-    df_joined = df_parquet.set_index(parquet_column).join(df_csv.set_index(csv_column))
+    # merged = df1.merge(df2, left_on='lkey', right_on='rkey')
+    df_joined = df_parquet.merge(df_csv, left_on=parquet_column, right_on=csv_column)
+    df_joined['Date de début'] = ps.to_datetime(df_joined['Date de début'])
+    df_joined['Date de fin'] = ps.to_datetime(df_joined['Date de fin'])
+    print(df_joined.head(5))
     print("--- Jointure effectuée ---")
 
     # save joined data to S3
@@ -99,8 +103,10 @@ def combine_datasets(parquetfile, csvfile, parquet_column, csv_column):
         print(f"--- Dossier data_L2/{current_date.strftime('%Y%m%d')}/{polluant} créé ---")
 
     df_joined['date'] = current_date.strftime('%Y-%m-%d')
+    print(df_joined.head(5))
     df_joined.to_parquet(
         f'{S3_OUTPUT_PATH}/FR_E2_GPS_{current_date.strftime('%Y%m%d')}_L2.parquet',
+        times="int96",
         mode='overwrite'
     )
     print(f"--- Résultat enregistré sur S3 : {S3_OUTPUT_PATH} ---")
@@ -109,15 +115,16 @@ def combine_datasets(parquetfile, csvfile, parquet_column, csv_column):
 
 
 
-S3_PREFIX = "data_L1/"
-# 📌 Exécution de la fonction
+S3_PREFIX = f"data_L1/{current_date.strftime('%Y%m%d')}/"
+# Exécution de la fonction
 parquet_files = list_all_parquet_files(S3_BUCKET_NAME, S3_PREFIX)
 
-# 📌 Affichage des fichiers trouvés
+# Affichage des fichiers trouvés
 print("✅ Fichiers Parquet trouvés :")
 for file in parquet_files:
     print(f"--- Parquet file: {file} ---")
     df_combined = combine_datasets(file, CSV_INPUT_PATH, "code site", "NatlStationCode")
+    print(df_combined.head(5))
 
 # Arrêter la session Spark
 spark.stop()

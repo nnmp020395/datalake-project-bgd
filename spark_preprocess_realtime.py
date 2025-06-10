@@ -2,14 +2,14 @@ from pyspark.sql import SparkSession
 from airflow.hooks.base import BaseHook
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from pyspark import SparkConf, SparkContext
-from pyspark.sql.functions import lit
+from pyspark.sql.functions import lit, col
 import boto3
 import sys
 import os
 
 import datetime as dt
 current_date = dt.datetime.now()
-# current_date = current_date - dt.timedelta(days=1)
+# current_date = current_date - dt.timedelta(days=4)
 
 # Récupérer les informations de connexion à S3 de la connexion Airflow
 conn = BaseHook.get_connection("aws_default")
@@ -93,8 +93,11 @@ columns_selected = ['Date de début', 'Date de fin', 'code zas', 'Zas',
 df = df.select(columns_selected)
 # Nettoyage des données (suppression des valeurs nulles)
 df_cleaned = df.dropna(subset=['Date de début', 'Date de fin', 'valeur', 'valeur brute'])
+print(df_cleaned.show(5))
 # GroupBy Zas et Polluant et sauvegarder les données en fichiers Parquet distincts
 grouped_df = df_cleaned.groupBy("Zas", "Polluant").count().show()
+
+df_cleaned = df_cleaned.withColumn("Polluant_copy", col("Polluant"))  # ✅ Créer une copie de la colonne
 
 df_cleaned.repartition("Zas", "Polluant") \
     .write.mode("overwrite") \

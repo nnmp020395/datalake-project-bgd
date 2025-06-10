@@ -7,11 +7,11 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from pyspark.sql.types import StructType, StructField, DoubleType, IntegerType
 from pyspark.sql.types import TimestampType, FloatType, StringType, MapType, BinaryType
 from pyspark import SparkConf, SparkContext
-from pyspark.sql.functions import array, decode, col, udf, date_format
+from pyspark.sql.functions import array, decode, col, udf
 
 import datetime as dt
 current_date = dt.datetime.now()
-# current_date = current_date - dt.timedelta(days=4)
+current_date = current_date - dt.timedelta(days=1)
 
 # Connexion à AWS S3
 conn = BaseHook.get_connection("aws_default")
@@ -79,38 +79,40 @@ def list_all_parquet_files(bucket, prefix):
     """Liste tous les fichiers Parquet dans un bucket S3 avec pagination"""
     files = []
     paginator = s3_client.get_paginator("list_objects_v2")
+
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         if "Contents" in page:
             for obj in page["Contents"]:
                 if obj["Key"].endswith(".parquet"):
                     files.append(f"s3a://{bucket}/{obj['Key']}")
+
     return files
 
 #------------------------------------------------------------------------
 # Configuration le schéma du Dataframe
-# schema = StructType([
-#     StructField("Date de début", TimestampType(), True),
-#     StructField("Date de fin", TimestampType(), True),
-#     StructField("code zas", StringType(), True),
-#     StructField("Zas", StringType(), True),
-#     StructField("code site", StringType(), True),
-#     StructField("nom site", StringType(), True),
-#     StructField("type d'implantation", StringType(), True),
-#     StructField("Polluant", StringType(), True),
-#     StructField("type d'influence", StringType(), True),
-#     StructField("valeur", DoubleType(), True),
-#     StructField("valeur brute", DoubleType(), True),
-#     StructField("unité de mesure", StringType(), True),
-#     StructField("validité", IntegerType(), True),
-#     StructField("nuts3", StringType(), True),
-#     StructField("nuts2", StringType(), True),
-#     StructField("NatlStationCode", StringType(), True),
-#     StructField("Name", StringType(), True),
-#     StructField("Latitude", DoubleType(), True),
-#     StructField("Longitude", DoubleType(), True),
-#     # StructField("GPS",  StringType(), True)
-# ])
-# print('--- Configuration du schéma finie ---')
+schema = StructType([
+    StructField("Date de début", TimestampType(), True),
+    StructField("Date de fin", TimestampType(), True),
+    StructField("code zas", StringType(), True),
+    StructField("Zas", StringType(), True),
+    StructField("code site", StringType(), True),
+    StructField("nom site", StringType(), True),
+    StructField("type d'implantation", StringType(), True),
+    StructField("Polluant", StringType(), True),
+    StructField("type d'influence", StringType(), True),
+    StructField("valeur", DoubleType(), True),
+    StructField("valeur brute", DoubleType(), True),
+    StructField("unité de mesure", StringType(), True),
+    StructField("validité", IntegerType(), True),
+    StructField("nuts3", StringType(), True),
+    StructField("nuts2", StringType(), True),
+    StructField("NatlStationCode", StringType(), True),
+    StructField("Name", StringType(), True),
+    StructField("Latitude", DoubleType(), True),
+    StructField("Longitude", DoubleType(), True),
+    # StructField("GPS",  StringType(), True)
+])
+print('--- Configuration du schéma finie ---')
 # Date de début	Date de fin	code zas	Zas	code site	nom site	type d'implantation	Polluant	type d'influence	valeur	valeur brute	unité de mesure	validité
 # nuts3	nuts2	NatlStationCode	Name	Latitude	Longitude	GPS
 #------------------------------------------------------------------------
@@ -160,78 +162,86 @@ print(f"{len(parquet_files)} fichiers Parquet trouvés")
 # print("--- Conversion en Pandas ---")
 
 
-df = spark.read.parquet(*parquet_files).repartition(8)
+# df = spark.read.parquet(*parquet_files).repartition(8)
 
-# ✅ Vérifier si les données sont bien chargées
-print("✅ Nombre de lignes avant traitement :", df.count())
+# # ✅ Vérifier si les données sont bien chargées
+# print("✅ Nombre de lignes avant traitement :", df.count())
 
-# ✅ Convertir les colonnes importantes en format lisible par Elasticsearch
-df = df.withColumn("Date de début", date_format(col("Date de début"), "yyyy-MM-dd'T'HH:mm:ss"))
-df = df.withColumn("Date de fin", date_format(col("Date de fin"), "yyyy-MM-dd'T'HH:mm:ss"))
-df = df.withColumn("Latitude", col("Latitude").cast("double"))
-df = df.withColumn("Longitude", col("Longitude").cast("double"))
-df = df.withColumn("GPS", array(col("Longitude"), col("Latitude")))
-
-# ✅ Suppression des valeurs `NULL`
-df = df.dropna()
-
-print("✅ Nombre de lignes après nettoyage :", df.count())
-print(df.show(5))
+# # ✅ Convertir les colonnes importantes en format lisible par Elasticsearch
+# df = df.withColumn("Date de début", col("Date de début").cast("string"))
+# df = df.withColumn("Date de fin", col("Date de fin").cast("string"))
+# df = df.withColumn("Latitude", col("Latitude").cast("double"))
+# df = df.withColumn("Longitude", col("Longitude").cast("double"))
 
 
-# Fonction pour l'indexation en batch dans Elasticsearch
-def bulk_index(df, index_name):
-    """Envoi des données en batch dans Elasticsearch"""
-    # Vérification si le DataFrame est vide
-    if df.count() == 0:
-        print("--- Aucune donnée à indexer ---")
-        return
-    actions = [
-        {
-            "_op_type": "index", # Opération d'indexation
-            "_index": index_name,
-            "_id": f"{row['date']}_{row['code site']}_{row['Polluant_copy']}",
-            "_source": row.asDict()
-        }
-        for row in df.collect()
-    ]
-    try:
-        helpers.bulk(client, actions, raise_on_error=False)
-        #client.index(index=index_name, id=actions[0]["_id"], document=actions[0]["_source"])
-    except Exception as e:
-        print(f"--- Erreur lors de l'indexation : {e} ---")
-        return
-    # print(f"{len(df)} documents indexés dans `{index_name}`")
+# # ✅ Suppression des valeurs `NULL`
+# df = df.dropna()
 
-# Indexer les données en batch dans Elasticsearch
-bulk_index(df, "polluants")
-
-print("--- Données indexées dans Elasticsearch Cloud ---")
-
-# Vérifier les données indexées
-# response = es.search(index="pollution_data", size=5)  # Affiche les 5 premiers document
-# print("--- Vérification ---",response["hits"]["hits"])  # Affichage des résultats
+# print("✅ Nombre de lignes après nettoyage :", df.count())
+# print(df.show(5))
 
 
-# for file in parquet_files:
-#     df = spark.read.schema(schema).parquet(file)
-#     print(f"--- Lecture Parquet file {file} ---")
-#     df = df.withColumn("date", df["Date de début"].cast("date"))
-#     df = df.withColumn("mapping_id", array(df["date"], df["code site"], df["Polluant"]))
-#     # indexer chaque document dans Elasticsearch Cloud
-#     df.write \
-#         .format("org.elasticsearch.spark.sql") \
-#         .option("es.nodes", elastic_host) \
-#         .option("es.port", elastic_port) \
-#         .option("es.net.http.auth.user", elastic_user) \
-#         .option("es.net.http.auth.pass", elastic_password) \
-#         .option("es.nodes.wan.only", "true") \
-#         .option("es.resource", "pollution_data") \
-#         .option("es.mapping.id", "mapping_id") \
-#         .option("es.index.auto.create", "false") \
-#         .mode("overwrite") \
-#         .save()
+# # Fonction pour l'indexation en batch dans Elasticsearch
+# def bulk_index(df, index_name):
+#     """Envoi des données en batch dans Elasticsearch"""
+#     # Vérification si le DataFrame est vide
+#     if df.count() == 0:
+#         print("--- Aucune donnée à indexer ---")
+#         return
+#     actions = [
+#         {
+#             "_index": index_name,
+#             "_id": f"{row['date']}_{row['code site']}_{row['Polluant_copy']}",
+#             "_source": row.asDict()
+#         }
+#         for row in df.collect()
+#     ]
+#     # client.bulk(operations=actions, pipeline="ent-search-generic-ingestion")
+#     try:
+#         helpers.bulk(client, actions, raise_on_error=True)
+#     except Exception as e:
+#         print(f"--- Erreur lors de l'indexation : {e} ---")
+#         return
+#     # print(f"{len(df)} documents indexés dans `{index_name}`")
+
+# # Indexer les données en batch dans Elasticsearch
+# # bulk_index(df, "polluants")
+
 # print("--- Données indexées dans Elasticsearch Cloud ---")
 
 
+test_doc = {
+    "_index": "polluants",
+    "_id": "test_doc",
+    "_source": {'Date de début': '2025-03-01T19:00:00',
+        'Date de fin': '2025-03-01T20:00:00',
+        'code zas': 'FR75ZAG01',
+        'Zas': 'ZAG BORDEAUX',
+        'code site': 'FR31007',
+        'nom site': 'BASSENS',
+        "type d'implantation": 'Urbaine',
+        "type d'influence": 'Fond',
+        'valeur': 11.2,
+        'valeur brute': 11.15,
+        'unité de mesure': 'µg-m3',
+        'validité': 1,
+        'Polluant_copy': 'NO2',
+        'NatlStationCode': 'FR31007',
+        'Name': 'BASSENS',
+        'Latitude': 44.900295,
+        'Longitude': -0.515835,
+        'date': '2025-03-01'
+        }
+    }
+res = client.index(index="polluants", id="test_doc", document=test_doc["_source"])
+print(res)
+
 spark.stop()
+
+
+# {
+#         "date": "2025-03-01T22:00:00",
+#         "polluant": "NO2",
+#         "valeur": 45.7,
+#         "unite": "µg/m³"
+#     }

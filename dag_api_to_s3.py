@@ -6,6 +6,7 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 from airflow.hooks.base import BaseHook
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from elasticsearch import Elasticsearch
 import json
 import requests
 import boto3
@@ -13,7 +14,8 @@ import io
 import pandas as pd
 
 import datetime as dt
-current_date = dt.datetime.now().strftime("%Y-%m-%d")
+current_date = dt.datetime.now()
+# current_date = current_date - dt.timedelta(days=4)
 year = dt.datetime.now().year
 
 # Définir les variables
@@ -165,6 +167,29 @@ def preprocess_s3_gps(S3_INPUT_KEY, S3_OUTPUT_KEY):
 
 
 #================================================================================================
+# 📌 Fonction pour envoyer les données à Elasticsearch
+def send_to_elasticsearch(S3_PARQUET_PATH, S3_BUCKET_NAME):
+    # Connexion à Elasticsearch Cloud
+    ES_CLOUD_ID = "Polluant_dashboard:dXMtZWFzdC0xLmF3cy5mb3VuZC5pbzo0NDMkYmEyZTg4ZWVkNTJlNDQ4MWEwY2E3YzE4ZWFkNDMxNzQkZDhkZjUxMWQ4Y2YzNGEwYWE0Zjk0MGJkZmFiN2E3N2Q="  # 📌 Trouvé dans Elastic Cloud
+    ES_USERNAME = "elastic"
+    ES_PASSWORD = "KBtXGBOpRFGI3oxWaeVlewbp"
+    ES_INDEX = "pollution_data"
+    es = Elasticsearch(
+        cloud_id=ES_CLOUD_ID,
+        basic_auth=(ES_USERNAME, ES_PASSWORD)
+    )
+
+    # Lire le fichier Parquet depuis S3 avec Pandas
+    s3_client = boto3.client("s3")
+    obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=S3_PARQUET_PATH)
+    df_pandas = pd.read_parquet(obj["Body"])
+
+    # Indexer les documents dans Elasticsearch
+    for _, row in df_pandas.iterrows():
+        document = row.to_dict()
+        es.index(index=ES_INDEX, document=document)
+
+    print(f"✅ {len(df_pandas)} documents indexés dans Elasticsearch")
 
 #================================================================================================
 # Définition du DAG Airflow
@@ -197,9 +222,9 @@ with DAG(
         task_id="extract_realtime_data",
         python_callable=fetch_store_data_to_s3,
         op_kwargs={
-            "url": f"{urls[2]}{year}/FR_E2_{current_date}.csv",
+            "url": f"{urls[2]}{year}/FR_E2_{current_date.strftime("%Y-%m-%d")}.csv",
             "headers": None,
-            "S3_FILE_PATH": f'data_L0/FR_E2_{current_date}.csv'
+            "S3_FILE_PATH": f'data_L0/FR_E2_{current_date.strftime("%Y-%m-%d")}.csv'
         }
     )
     preprocess_data = SparkSubmitOperator(
@@ -226,7 +251,21 @@ with DAG(
     )
     combine_data = SparkSubmitOperator(
         task_id="combine_datasets",
-        application="dags/spark_combine_processing.py",  # 🔹 Chemin du script Spark
+        application="dags/spark_combine_processing.py",  # Chemin du script Spark
+        conn_id="spark_connection",  #Connexion Spark définie dans Airflow
+        conf={
+            "spark_binary": "/opt/anaconda3/bin/spark-submit",
+            "spark.hadoop.fs.s3a.access.key": aws_access_id,
+            "spark.hadoop.fs.s3a.secret.key": aws_access_secret,
+            "spark.hadoop.fs.s3a.endpoint": "s3.us-east-1.amazonaws.com",
+            "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+            "spark.jars.packages": "org.apache.hadoop:hadoop-aws:3.3.4"
+        },
+        dag=dag
+    )
+    index_data = SparkSubmitOperator(
+        task_id="index_data_in_elasticsearch",
+        application="dags/to_kibana.py",  # 🔹 Chemin du script Spark
         conn_id="spark_connection",  # 🔹 Connexion Spark définie dans Airflow
         conf={
             "spark_binary": "/opt/anaconda3/bin/spark-submit",
@@ -239,4 +278,4 @@ with DAG(
         dag=dag
     )
     # Ordre d'exécution des tâches
-    [fetch_gps >> formatted_map, fetch_realtime_data >> preprocess_data] >> combine_data
+    [fetch_gps >> formatted_map, fetch_realtime_data >> preprocess_data] >> combine_data >> index_data
