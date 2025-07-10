@@ -12,5 +12,18 @@ The concentration of atmospheric polluants in realtime are used in this project.
 - In 2022, 585 stations in France will be measuring air pollutants.
 - Three types of locations are available, depending on the station's environment: urban, peri-urban, and rural.
 - Three main types of influences: industrial, background, and traffic.
+- Real-time data updated every hour.
 
-### Fond map
+![Dataset](/assets/images/dataset.png)
+
+### France map
+
+## Data ingestion
+
+
+
+## Data transformation
+
+## Combination data
+
+## Indexing data
