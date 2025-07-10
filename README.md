@@ -2,6 +2,7 @@
 
 The goal of this work is create a simple end-to-end data architecture, including data ingestion, data transformation and data exposition, which will permit us to structure the data correctly, to have a clean data pipeline and shareable data.
 
+![Schema global](/assets/images/schema_structure.png)
 
 ## Datasets
 ### Realtime dataset
