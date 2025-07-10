@@ -4,6 +4,8 @@ The goal of this work is create a simple end-to-end data architecture, including
 
 ![Schema global](/assets/images/schema_structure.png)
 
+Throughout the project, Airfloww was deployed to orchestrate our operations
+
 ## Datasets
 ### Realtime dataset
 
@@ -22,13 +24,19 @@ The concentration of atmospheric polluants in realtime are used in this project.
 
 ![Data ingestion](/assets/images/data_ingestion.png)
 
+Two ingestion tasks worked in parallel for getting the realtime dataset and gps mapping. On this step, any transformation method was applied. Data was stockked on AWS Bucket S3
+
 ## Data transformation
 
 ![Data transformation](/assets/images/data_transformation.png)
 
+Two extraction tasks worked in parallel but the formatting tasks for each dataset worked independently and sequentially after their extraction tasks. Dataset was convetted in parquet format and arranged by polluants.
+
 ## Combination data
 
 ![Data combination](/assets/images/data_combination.png)
+
+Create before indexes on ElesticSearch, after send all datasets to ElasticSearch.
 
 ## Indexing data
 
