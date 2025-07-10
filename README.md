@@ -20,10 +20,20 @@ The concentration of atmospheric polluants in realtime are used in this project.
 
 ## Data ingestion
 
-
+![Data ingestion](/assets/images/data_ingestion.png)
 
 ## Data transformation
 
+![Data transformation](/assets/images/data_transformation.png)
+
 ## Combination data
 
+![Data combination](/assets/images/data_combination.png)
+
 ## Indexing data
+
+![Data indexing](/assets/images/data_indexing.png)
+
+## Data visualization
+
+![Data ingestion](/assets/images/data_visualization.png)
